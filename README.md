@@ -70,21 +70,35 @@ collapsed into declarations.
 
 ## Frontend
 
-The plugin emits `sidecar://state` (lifecycle changes) and `sidecar://log`
-events, and exposes commands:
+Typed bindings live in [`guest-js/`](guest-js/) (not yet on npm — same
+feedback-first reasoning as crates.io):
 
 ```ts
-import { invoke } from "@tauri-apps/api/core";
+import { status, restart, onStateChange, onLog } from "tauri-plugin-sidecar-api";
 
-const statuses = await invoke("plugin:sidecar|status");      // [{ name, state, port }]
-await invoke("plugin:sidecar|restart", { name: "backend" });
-
-import { listen } from "@tauri-apps/api/event";
-await listen("sidecar://state", (e) => console.log(e.payload)); // { name, state }
+const fleet = await status();                 // [{ name, state, port }]
+await restart("backend");
+await onStateChange(({ name, state }) => console.log(name, state));
 ```
+
+Under the hood these are plain Tauri commands and events
+(`plugin:sidecar|status`, `sidecar://state`, `sidecar://log`), so raw
+`invoke`/`listen` works too.
 
 Default permissions grant read-only `status` and `logs`; `start`/`stop`/
 `restart` are opt-in (add `allow-start`, etc. to your capability).
+
+## Try it
+
+[`examples/demo-app`](examples/demo-app/) is a runnable Tauri app (static
+HTML UI, no Node needed) with two sidecars: an HTTP server that receives a
+dynamic port + session token, and a dependent sidecar that deliberately
+spawns child processes — stop it and watch the whole tree die, on Windows
+included.
+
+```sh
+cd examples/demo-app/src-tauri && cargo run
+```
 
 ## Design
 
