@@ -450,3 +450,98 @@ server.serve_forever()
         "graceful hook should fire before the kill: {logs:?}"
     );
 }
+
+#[test]
+fn launch_outside_runtime_errors_clearly() {
+    // No #[tokio::test] on purpose: a plain thread has no runtime context.
+    let dir = tempfile::tempdir().unwrap();
+    let result = SidecarManager::launch(
+        vec![sh("x", "sleep 1")],
+        Arc::new(RecordingSink::default()),
+        dir.path(),
+        <std::path::PathBuf as Clone>::clone,
+    );
+    let err = result.err().expect("must fail without a runtime");
+    assert!(
+        err.to_string().contains("tokio runtime"),
+        "clear error, not a panic: {err}"
+    );
+}
+
+#[tokio::test]
+async fn start_autostarts_idle_dependencies() {
+    let dir = tempfile::tempdir().unwrap();
+    let sink = Arc::new(RecordingSink::default());
+    let manager = launch(
+        vec![
+            sh("base", "sleep 0.2; echo BASE_READY; sleep 300").health(HealthCheck::StdoutMarker {
+                pattern: "BASE_READY".into(),
+                timeout_secs: 10,
+            }),
+            sh("top", "sleep 300").depends_on("base"),
+        ],
+        sink.clone(),
+        dir.path(),
+    );
+
+    // Only start `top`; `base` must be brought up automatically first.
+    manager.start("top").await.unwrap();
+    wait_for_state(
+        &manager,
+        "top",
+        |s| matches!(s, SidecarState::Healthy),
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(matches!(
+        manager.state("base").unwrap(),
+        SidecarState::Healthy
+    ));
+
+    manager.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn start_on_running_sidecar_is_a_noop() {
+    let dir = tempfile::tempdir().unwrap();
+    let sink = Arc::new(RecordingSink::default());
+    let manager = launch(
+        vec![
+            sh("steady", "echo PID=$$; sleep 300").health(HealthCheck::StdoutMarker {
+                pattern: "PID=".into(),
+                timeout_secs: 10,
+            }),
+        ],
+        sink.clone(),
+        dir.path(),
+    );
+
+    manager.start("steady").await.unwrap();
+    wait_for_state(
+        &manager,
+        "steady",
+        |s| matches!(s, SidecarState::Healthy),
+        Duration::from_secs(10),
+    )
+    .await;
+    let pid_before = manager.logs("steady", 10).unwrap().join("\n");
+
+    // Second start must not respawn (no orphaned old tree, same process).
+    manager.start("steady").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    assert!(
+        matches!(manager.state("steady").unwrap(), SidecarState::Healthy),
+        "still healthy after redundant start"
+    );
+    let starts = sink
+        .states_of("steady")
+        .iter()
+        .filter(|s| matches!(s, SidecarState::Starting))
+        .count();
+    assert_eq!(starts, 1, "exactly one spawn, redundant start is a no-op");
+    let pid_after = manager.logs("steady", 10).unwrap().join("\n");
+    assert_eq!(pid_before, pid_after, "same process, same logged pid");
+
+    manager.shutdown_all().await;
+}

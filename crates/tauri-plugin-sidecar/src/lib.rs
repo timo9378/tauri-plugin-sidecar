@@ -103,8 +103,13 @@ impl Builder {
                     }
                 };
 
-                let manager = SidecarManager::launch(configs, sink, &state_dir, resolve)
-                    .map_err(|e| e.to_string())?;
+                // Plugin setup runs on the main thread, outside any tokio
+                // context — block_on enters Tauri's runtime so the manager's
+                // supervisor tasks can spawn.
+                let manager = tauri::async_runtime::block_on(async {
+                    SidecarManager::launch(configs, sink, &state_dir, resolve)
+                })
+                .map_err(|e| e.to_string())?;
                 let manager = Arc::new(manager);
                 app.manage(PluginState {
                     manager: manager.clone(),

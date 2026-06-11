@@ -32,6 +32,11 @@ impl SidecarManager {
         state_dir: &Path,
         resolve_binary: impl Fn(&PathBuf) -> PathBuf,
     ) -> Result<Self, SidecarError> {
+        // Fail with a clear error instead of tokio's spawn panic when called
+        // outside a runtime (e.g. directly from Tauri's setup thread).
+        if tokio::runtime::Handle::try_current().is_err() {
+            return Err(SidecarError::NoAsyncRuntime);
+        }
         let start_order = topo_sort(&configs)?;
 
         let pid_store = Arc::new(PidStore::open(state_dir));
@@ -85,20 +90,33 @@ impl SidecarManager {
             .ok_or_else(|| SidecarError::UnknownSidecar(name.into()))
     }
 
-    /// Starts one sidecar, waiting for its dependencies to be healthy first.
+    /// Starts one sidecar, first starting its (transitive) dependencies in
+    /// topological order and waiting for each to turn healthy — the
+    /// docker-compose semantic. Starting an already-running sidecar is a
+    /// no-op.
     pub async fn start(&self, name: &str) -> Result<(), SidecarError> {
-        let handle = self
-            .handles
-            .get(name)
-            .ok_or_else(|| SidecarError::UnknownSidecar(name.into()))?;
-
-        for dep in &handle.config.depends_on {
-            self.await_healthy(dep, name).await?;
+        if !self.handles.contains_key(name) {
+            return Err(SidecarError::UnknownSidecar(name.into()));
         }
 
-        let (tx, rx) = oneshot::channel();
-        let _ = handle.cmd_tx.send(Command::Start(tx)).await;
-        let _ = rx.await;
+        // Dependency closure of `name`, in start order.
+        let mut needed = std::collections::HashSet::new();
+        collect_deps(name, &self.handles, &mut needed);
+        let chain: Vec<&String> = self
+            .start_order
+            .iter()
+            .filter(|n| needed.contains(n.as_str()) || n.as_str() == name)
+            .collect();
+
+        for member in chain {
+            let handle = &self.handles[member.as_str()];
+            let (tx, rx) = oneshot::channel();
+            let _ = handle.cmd_tx.send(Command::Start(tx)).await;
+            let _ = rx.await;
+            if member != name {
+                self.await_healthy(member, name).await?;
+            }
+        }
         Ok(())
     }
 
@@ -208,6 +226,21 @@ impl SidecarManager {
                         });
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Collects the transitive dependencies of `name` into `out`.
+fn collect_deps(
+    name: &str,
+    handles: &HashMap<String, SupervisorHandle>,
+    out: &mut std::collections::HashSet<String>,
+) {
+    if let Some(handle) = handles.get(name) {
+        for dep in &handle.config.depends_on {
+            if out.insert(dep.clone()) {
+                collect_deps(dep, handles, out);
             }
         }
     }

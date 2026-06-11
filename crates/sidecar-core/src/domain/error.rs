@@ -36,6 +36,12 @@ pub enum SidecarError {
     #[error("dependency `{dep}` failed; not starting `{name}`")]
     DependencyFailed { name: String, dep: String },
 
+    #[error(
+        "SidecarManager::launch requires a tokio runtime context — call it inside \
+         tauri::async_runtime::block_on (or any tokio runtime)"
+    )]
+    NoAsyncRuntime,
+
     #[error("os error: {0}")]
     Os(String),
 }

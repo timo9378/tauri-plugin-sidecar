@@ -185,55 +185,61 @@ impl Supervisor {
             self.set_state(SidecarState::Healthy);
             let healthy_since = Instant::now();
 
-            // Monitor: crash vs. command.
-            tokio::select! {
-                exit = spawned.child.wait() => {
-                    self.pid_store.clear(&self.config.name);
-                    let code = exit.ok().and_then(|s| s.code());
-                    tracing::warn!(sidecar = %self.config.name, ?code, "exited unexpectedly");
+            // Monitor: crash vs. command. The inner loop lets benign commands
+            // (Start on an already-running sidecar) be acknowledged WITHOUT
+            // touching the live process — respawning here would orphan the
+            // old tree.
+            loop {
+                tokio::select! {
+                    exit = spawned.child.wait() => {
+                        self.pid_store.clear(&self.config.name);
+                        let code = exit.ok().and_then(|s| s.code());
+                        tracing::warn!(sidecar = %self.config.name, ?code, "exited unexpectedly");
 
-                    // A long healthy run earns a fresh backoff schedule.
-                    if let RestartPolicy::OnCrash { reset_after_secs, .. } = &self.config.restart {
-                        if healthy_since.elapsed() >= Duration::from_secs(*reset_after_secs) {
-                            attempt = 0;
+                        // A long healthy run earns a fresh backoff schedule.
+                        if let RestartPolicy::OnCrash { reset_after_secs, .. } = &self.config.restart {
+                            if healthy_since.elapsed() >= Duration::from_secs(*reset_after_secs) {
+                                attempt = 0;
+                            }
+                        }
+                        let detail = format!("exited with code {code:?}");
+                        match self.backoff_or_fail(&mut attempt, &detail, cmd_rx).await {
+                            BackoffOutcome::Retry => break,
+                            BackoffOutcome::Stopped => return false,
+                            BackoffOutcome::Shutdown => return true,
+                            BackoffOutcome::Failed => return false,
                         }
                     }
-                    let detail = format!("exited with code {code:?}");
-                    match self.backoff_or_fail(&mut attempt, &detail, cmd_rx).await {
-                        BackoffOutcome::Retry => continue,
-                        BackoffOutcome::Stopped => return false,
-                        BackoffOutcome::Shutdown => return true,
-                        BackoffOutcome::Failed => return false,
-                    }
-                }
-                cmd = cmd_rx.recv() => {
-                    match cmd {
-                        Some(Command::Stop(ack)) => {
-                            self.stop_process(&mut spawned).await;
-                            let _ = ack.send(());
-                            self.set_state(SidecarState::Stopped);
-                            return false;
-                        }
-                        Some(Command::Restart(ack)) => {
-                            self.stop_process(&mut spawned).await;
-                            let _ = ack.send(Ok(()));
-                            attempt = 0;
-                            continue;
-                        }
-                        Some(Command::Shutdown(ack)) => {
-                            self.stop_process(&mut spawned).await;
-                            let _ = ack.send(());
-                            self.set_state(SidecarState::Stopped);
-                            return true;
-                        }
-                        Some(Command::Start(ack)) => {
-                            let _ = ack.send(Ok(())); // already running
-                            continue;
-                        }
-                        None => {
-                            // Plugin dropped: take the tree down with us.
-                            self.stop_process(&mut spawned).await;
-                            return true;
+                    cmd = cmd_rx.recv() => {
+                        match cmd {
+                            Some(Command::Stop(ack)) => {
+                                self.stop_process(&mut spawned).await;
+                                let _ = ack.send(());
+                                self.set_state(SidecarState::Stopped);
+                                return false;
+                            }
+                            Some(Command::Restart(ack)) => {
+                                self.stop_process(&mut spawned).await;
+                                let _ = ack.send(Ok(()));
+                                attempt = 0;
+                                break;
+                            }
+                            Some(Command::Shutdown(ack)) => {
+                                self.stop_process(&mut spawned).await;
+                                let _ = ack.send(());
+                                self.set_state(SidecarState::Stopped);
+                                return true;
+                            }
+                            Some(Command::Start(ack)) => {
+                                // Already running — a no-op, keep monitoring
+                                // the SAME process.
+                                let _ = ack.send(Ok(()));
+                            }
+                            None => {
+                                // Plugin dropped: take the tree down with us.
+                                self.stop_process(&mut spawned).await;
+                                return true;
+                            }
                         }
                     }
                 }
