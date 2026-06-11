@@ -1,0 +1,6 @@
+# Threshold lints — exceeding one usually means "refactor", not "raise the bar".
+cognitive-complexity-threshold = 30
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250
+enum-variant-size-threshold = 200
+trivial-copy-size-limit = 128

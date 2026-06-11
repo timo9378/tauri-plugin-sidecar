@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = ["crates/sidecar-core", "crates/tauri-plugin-sidecar"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/timo9378/tauri-plugin-sidecar"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+# Public API is documented; internal fields and thiserror variants (whose
+# #[error] message is the doc) are covered progressively rather than blocking CI.
+missing_docs = "allow"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# Hard stops — half-finished or debug-leftover code never merges.
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+undocumented_unsafe_blocks = "deny"
+arc_with_non_send_sync = "deny"
+# Quality bar — warn locally, CI runs `clippy -- -D warnings` to enforce.
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+large_futures = "warn"
+# Too opinionated for this codebase (each allow earns its keep):
+module_name_repetitions = "allow" # SidecarConfig in config.rs is the convention here
+missing_errors_doc = "allow"      # thiserror messages document the Err variants
+missing_panics_doc = "allow"      # panic paths are lint-guarded already
+must_use_candidate = "allow"      # too noisy; #[must_use] added where it matters
+doc_markdown = "allow"            # trips on TCP / SIGTERM / KILL_ON_JOB_CLOSE
+uninlined_format_args = "allow"   # style war with no winner
+match_same_arms = "allow"         # Stopped vs Failed share an action but not intent
+needless_pass_by_value = "allow"  # builder/resolver closures are owned by design
+needless_continue = "allow"       # `Retry => continue` mirrors the `=> return` arms
