@@ -1,0 +1,23 @@
+[package]
+name = "tauri-plugin-sidecar"
+description = "Production-grade sidecar lifecycle management for Tauri: supervision, crash restarts with backoff, dynamic ports, auth tokens, health checks, kill-tree shutdown, and orphan cleanup."
+keywords = ["tauri", "plugin", "sidecar", "process", "supervisor"]
+categories = ["os", "asynchronous"]
+links = "tauri-plugin-sidecar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sidecar-core = { version = "0.1.0", path = "../sidecar-core" }
+tauri = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
