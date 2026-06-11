@@ -47,6 +47,11 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The demo app is the only place the plugin runs inside a real Tauri
+      # build (separate workspace, cfg(windows)/cfg(unix) sidecar configs).
+      - name: Check demo app
+        run: cargo check --manifest-path examples/demo-app/src-tauri/Cargo.toml
+
   msrv:
     runs-on: ubuntu-latest
     steps:
