@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>tauri-plugin-sidecar demo</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: ui-monospace, Consolas, monospace; background: #14161a; color: #d8dee9; margin: 0; padding: 1.2rem; }
+    h1 { font-size: 1.05rem; margin: 0 0 1rem; color: #88c0d0; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+    th, td { text-align: left; padding: .45rem .7rem; border-bottom: 1px solid #2b313b; font-size: .85rem; }
+    th { color: #81a1c1; font-weight: 600; }
+    .state { padding: .1rem .5rem; border-radius: 4px; font-size: .78rem; }
+    .healthy { background: #1d3324; color: #a3be8c; }
+    .starting, .waiting_for_deps, .backoff, .stopping { background: #3a3020; color: #ebcb8b; }
+    .stopped, .idle { background: #2b313b; color: #8a93a5; }
+    .failed { background: #3b2326; color: #bf616a; }
+    button { background: #242933; color: #d8dee9; border: 1px solid #3b4252; border-radius: 4px; padding: .25rem .7rem; margin-right: .35rem; cursor: pointer; font: inherit; font-size: .78rem; }
+    button:hover { background: #2e3440; }
+    #log { background: #0e1013; border: 1px solid #2b313b; border-radius: 6px; padding: .7rem; height: 320px; overflow-y: auto; font-size: .78rem; line-height: 1.45; white-space: pre-wrap; }
+    .evt { color: #81a1c1; }
+    .stderr { color: #d08770; }
+    .meta { color: #616e88; }
+  </style>
+</head>
+<body>
+  <h1>tauri-plugin-sidecar — live fleet</h1>
+  <table>
+    <thead><tr><th>sidecar</th><th>state</th><th>port</th><th>actions</th></tr></thead>
+    <tbody id="fleet"></tbody>
+  </table>
+  <div id="log"></div>
+
+  <script>
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+    const fleet = document.getElementById("fleet");
+    const log = document.getElementById("log");
+
+    function append(cls, text) {
+      const line = document.createElement("div");
+      line.className = cls;
+      line.textContent = `${new Date().toLocaleTimeString()} ${text}`;
+      log.appendChild(line);
+      while (log.childElementCount > 400) log.removeChild(log.firstChild);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function describe(state) {
+      if (state.state === "backoff") return `backoff #${state.attempt} (${state.delay_secs}s)`;
+      if (state.state === "failed") return `failed: ${state.reason}`;
+      return state.state;
+    }
+
+    async function refresh() {
+      try {
+        const rows = await invoke("plugin:sidecar|status", {});
+        fleet.innerHTML = "";
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          const action = (cmd) => {
+            const b = document.createElement("button");
+            b.textContent = cmd;
+            b.onclick = () =>
+              invoke(`plugin:sidecar|${cmd}`, { name: row.name })
+                .then(() => append("meta", `${cmd} ${row.name}: ok`))
+                .catch((e) => append("stderr", `${cmd} ${row.name}: ${e}`));
+            return b;
+          };
+          const name = document.createElement("td");
+          name.textContent = row.name;
+          const state = document.createElement("td");
+          const chip = document.createElement("span");
+          chip.className = `state ${row.state.state}`;
+          chip.textContent = describe(row.state);
+          state.appendChild(chip);
+          const port = document.createElement("td");
+          port.textContent = row.port ?? "—";
+          const actions = document.createElement("td");
+          actions.append(action("start"), action("stop"), action("restart"));
+          tr.append(name, state, port, actions);
+          fleet.appendChild(tr);
+        }
+      } catch (e) {
+        append("stderr", `status: ${e}`);
+      }
+    }
+
+    listen("sidecar://state", (e) =>
+      append("evt", `[${e.payload.name}] -> ${describe(e.payload.state)}`));
+    listen("sidecar://log", (e) =>
+      append(e.payload.stream === "stderr" ? "stderr" : "meta",
+             `[${e.payload.sidecar}:${e.payload.stream}] ${e.payload.line}`));
+
+    refresh();
+    setInterval(refresh, 1000);
+  </script>
+</body>
+</html>

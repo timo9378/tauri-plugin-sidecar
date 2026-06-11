@@ -1,0 +1,17 @@
+[package]
+name = "sidecar-demo-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Detached from the plugin workspace on purpose: building a full Tauri app
+# needs system webview deps that the library CI doesn't.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-sidecar = { path = "../../../crates/tauri-plugin-sidecar" }
+serde_json = "1"
