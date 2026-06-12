@@ -153,6 +153,36 @@ pub(crate) struct PluginState {
     pub manager: Arc<SidecarManager>,
 }
 
+/// Rust-side access to the [`SidecarManager`], following the
+/// `tauri-plugin-shell` `ShellExt` convention. Lets app code (commands,
+/// setup, event handlers) drive sidecars directly — start on demand, read
+/// state, and forward the allocated port or auth token to other consumers:
+///
+/// ```rust,ignore
+/// use tauri_plugin_sidecar::SidecarExt;
+///
+/// #[tauri::command]
+/// async fn ensure_backend(app: tauri::AppHandle) -> Result<u16, String> {
+///     let manager = app.sidecar_manager();
+///     manager.start("backend").await.map_err(|e| e.to_string())?;
+///     Ok(manager.port("backend").map_err(|e| e.to_string())?.unwrap_or(0))
+/// }
+/// ```
+pub trait SidecarExt<R: Runtime> {
+    /// Returns the sidecar manager.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the sidecar plugin was not registered on this app.
+    fn sidecar_manager(&self) -> Arc<SidecarManager>;
+}
+
+impl<R: Runtime, T: Manager<R>> SidecarExt<R> for T {
+    fn sidecar_manager(&self) -> Arc<SidecarManager> {
+        self.state::<PluginState>().manager.clone()
+    }
+}
+
 struct TauriSink<R: Runtime> {
     app: tauri::AppHandle<R>,
 }
