@@ -63,7 +63,7 @@ collapsed into declarations.
 | **Orphan cleanup** | Sidecars surviving a previous crash are killed on next launch (matched by pid **and** exe name, so recycled pids are safe). |
 | **Crash restarts** | Configurable backoff schedule; a sustained healthy run resets it; a *requested* stop never restarts. |
 | **Ports** | Dynamic allocation injected via env var, or a fixed port with fail-fast collision detection. |
-| **Auth** | A fresh random token per session, injected at spawn — a sidecar not launched by your app never learns it. |
+| **Auth** | A fresh random token per session, injected at spawn — a sidecar not launched by your app never learns it. Or provide your own value (`auth_token_value`) when several sidecars and the frontend must share one secret; read it back via `auth_token(name)`. |
 | **Health gating** | TCP connect, HTTP 2xx, or a stdout regex marker — with timeouts. Dependents only start once a sidecar is *healthy*, not merely *running*. |
 | **Dependency order** | `depends_on` with topological startup and reverse-order shutdown; cycles rejected at launch. |
 | **Logs** | Per-sidecar ring buffer (tail via the `logs` command); opt into `sidecar://log` events to stream to the webview. |
@@ -87,6 +87,29 @@ Under the hood these are plain Tauri commands and events
 
 Default permissions grant read-only `status` and `logs`; `start`/`stop`/
 `restart` are opt-in (add `allow-start`, etc. to your capability).
+
+## Rust-side control
+
+App code gets the same manager the frontend commands use, via the
+`SidecarExt` trait (the `tauri-plugin-shell` `ShellExt` convention) — start
+on demand, inspect state, and forward the allocated port or auth token to
+whoever needs it. The plugin owns the mechanism; your app keeps the policy:
+
+```rust
+use tauri_plugin_sidecar::SidecarExt;
+
+#[tauri::command]
+async fn ensure_backend(app: tauri::AppHandle) -> Result<u16, String> {
+    let manager = app.sidecar_manager();
+    manager.start("backend").await.map_err(|e| e.to_string())?; // no-op if running
+    let port = manager.port("backend").map_err(|e| e.to_string())?;
+    Ok(port.unwrap_or(0))
+}
+```
+
+`manager.auth_token(name)` returns the effective token (generated or
+app-provided), so handing it to the webview is one custom command away — and
+stays a deliberate, app-controlled decision rather than a default grant.
 
 ## Try it
 
