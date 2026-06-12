@@ -117,13 +117,19 @@ infra`); `domain` is pure and IO-free. See [CONTRIBUTING.md](CONTRIBUTING.md).
 Early but real: the supervision engine is covered by integration tests that
 drive actual OS processes (kill-tree reaching grandchildren, crash backoff,
 health gating, dependency ordering, orphan cleanup), and CI runs clippy
-`-D warnings` and the test suite on Linux, Windows, and macOS.
+`-D warnings` and the test suite on Linux, Windows, and macOS — including a
+Windows integration test that spawns a real `powershell.exe` through `PATH`.
+
+**Field-tested on Windows**: the [demo app](examples/demo-app) has been run on
+a real Windows machine — dynamic port + token injection into a PowerShell
+`HttpListener`, `depends_on` gating, and the part that matters most: stopping a
+sidecar that spawned its own children leaves no survivors in Task Manager
+(Job Object kill path), and closing the app window orphans nothing.
 
 **Not yet covered** (and honest about it): the bundling layer (large-runtime
 download, NSIS 2 GB limit, antivirus-aware extraction) is planned as a separate
-opt-in, not in this crate yet. Windows Job Object behavior is verified to
-compile and is exercised in CI; field reports on heavy real-world trees
-(forking Python workers, bundled `ollama`) are very welcome.
+opt-in, not in this crate yet. Field reports on heavy real-world trees
+(forking Python workers, bundled `ollama`) are still very welcome.
 
 ## License
 
