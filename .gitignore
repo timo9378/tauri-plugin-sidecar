@@ -1,5 +1,4 @@
 target/
-Cargo.lock
 node_modules/
 guest-js/dist/
 examples/demo-app/src-tauri/gen/
