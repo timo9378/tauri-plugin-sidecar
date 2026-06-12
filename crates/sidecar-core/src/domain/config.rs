@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 pub struct SidecarConfig {
     /// Unique name, used in commands, events, and logs.
     pub name: String,
-    /// Path to the executable. Relative paths resolve against the Tauri
+    /// Path to the executable. Absolute paths run as-is; bare program names
+    /// (`python3`, `powershell.exe`) are resolved by the OS through `PATH`;
+    /// relative paths with directory components resolve against the Tauri
     /// resource directory at runtime (where bundled sidecars land).
     pub binary: PathBuf,
     /// Arguments passed to the binary.
@@ -26,6 +28,8 @@ pub struct SidecarConfig {
     pub env: HashMap<String, String>,
     /// Working directory. Defaults to the binary's parent directory —
     /// installers launch apps with surprising CWDs; never inherit one.
+    /// Bare PATH-resolved program names have no parent and keep the app's
+    /// own working directory.
     #[serde(default)]
     pub cwd: Option<PathBuf>,
     /// How the sidecar gets its listening port.

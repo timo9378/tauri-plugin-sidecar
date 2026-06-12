@@ -282,8 +282,11 @@ impl Supervisor {
             .cwd
             .clone()
             .or_else(|| {
+                // Bare PATH-resolved program names have an empty parent;
+                // an empty cwd makes spawn fail, so fall through to ".".
                 self.resolved_binary
                     .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
                     .map(std::path::Path::to_path_buf)
             })
             .unwrap_or_else(|| PathBuf::from("."));

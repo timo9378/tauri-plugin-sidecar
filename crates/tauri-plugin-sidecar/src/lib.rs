@@ -94,13 +94,7 @@ impl Builder {
 
                 let resource_dir = app.path().resource_dir().ok();
                 let resolve = move |p: &std::path::PathBuf| -> std::path::PathBuf {
-                    if p.is_absolute() {
-                        return p.clone();
-                    }
-                    match &resource_dir {
-                        Some(dir) => dir.join(p),
-                        None => p.clone(),
-                    }
+                    resolve_binary(resource_dir.as_deref(), p)
                 };
 
                 // Plugin setup runs on the main thread, outside any tokio
@@ -137,6 +131,24 @@ impl Builder {
     }
 }
 
+/// Resolves a configured binary path. Absolute paths run as-is; bare
+/// program names (single component, e.g. `powershell.exe`) pass through
+/// untouched so the OS resolves them via `PATH`; only relative paths with
+/// directory components are anchored to the bundle resource directory,
+/// where bundled sidecars land.
+fn resolve_binary(
+    resource_dir: Option<&std::path::Path>,
+    binary: &std::path::Path,
+) -> std::path::PathBuf {
+    if binary.is_absolute() || binary.components().nth(1).is_none() {
+        return binary.to_path_buf();
+    }
+    match resource_dir {
+        Some(dir) => dir.join(binary),
+        None => binary.to_path_buf(),
+    }
+}
+
 pub(crate) struct PluginState {
     pub manager: Arc<SidecarManager>,
 }
@@ -155,5 +167,46 @@ impl<R: Runtime> EventSink for TauriSink<R> {
 
     fn log_line(&self, line: &LogLine) {
         let _ = self.app.emit(EVENT_LOG, line);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use std::path::{Path, PathBuf};
+
+    use super::resolve_binary;
+
+    #[test]
+    fn bare_program_name_passes_through_for_path_lookup() {
+        let resources = std::env::temp_dir();
+        assert_eq!(
+            resolve_binary(Some(&resources), Path::new("powershell.exe")),
+            PathBuf::from("powershell.exe"),
+        );
+    }
+
+    #[test]
+    fn absolute_path_runs_as_is() {
+        let resources = std::env::temp_dir();
+        let absolute = resources.join("bundled").join("server");
+        assert_eq!(resolve_binary(Some(&resources), &absolute), absolute);
+    }
+
+    #[test]
+    fn relative_path_with_directories_anchors_to_resource_dir() {
+        let resources = std::env::temp_dir();
+        let relative = Path::new("binaries").join("server");
+        assert_eq!(
+            resolve_binary(Some(&resources), &relative),
+            resources.join(&relative),
+        );
+    }
+
+    #[test]
+    fn relative_path_without_resource_dir_is_untouched() {
+        let relative = Path::new("binaries").join("server");
+        assert_eq!(resolve_binary(None, &relative), relative);
     }
 }
