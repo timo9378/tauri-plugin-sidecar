@@ -94,14 +94,25 @@ pub fn spawn(
 
 impl SpawnedProcess {
     /// Sends the platform "please exit" signal to the whole tree.
-    /// Unix: SIGTERM to the process group. Windows: no-op (no portable
-    /// equivalent — use an HTTP graceful hook instead).
+    /// Unix: SIGTERM to the process group. Windows: `taskkill /T` without
+    /// `/F`, which asks every windowed process in the tree to close
+    /// (WM_CLOSE) — GUI sidecars exit cleanly; console processes ignore it
+    /// and fall to the forced kill after the grace period.
     pub fn signal_graceful(&self) {
         #[cfg(unix)]
         // SAFETY: killpg with a valid pid and signal is always sound; a stale
         // pid simply returns ESRCH, which we ignore. No memory is touched.
         unsafe {
             libc::killpg(i32::try_from(self.pid).unwrap_or(i32::MAX), libc::SIGTERM);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/T", "/PID", &self.pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
         }
     }
 
