@@ -73,6 +73,17 @@ impl SidecarManager {
             .ok_or_else(|| SidecarError::UnknownSidecar(name.into()))
     }
 
+    /// The effective auth token (generated or app-provided) of a sidecar
+    /// configured with `AuthStrategy::Token`, so the app can forward it to
+    /// other consumers (the frontend, peer sidecars). `None` for sidecars
+    /// without token auth.
+    pub fn auth_token(&self, name: &str) -> Result<Option<String>, SidecarError> {
+        self.handles
+            .get(name)
+            .map(|h| h.token.clone())
+            .ok_or_else(|| SidecarError::UnknownSidecar(name.into()))
+    }
+
     pub fn logs(&self, name: &str, lines: usize) -> Result<Vec<String>, SidecarError> {
         self.handles
             .get(name)

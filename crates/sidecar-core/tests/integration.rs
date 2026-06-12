@@ -545,3 +545,57 @@ async fn start_on_running_sidecar_is_a_noop() {
 
     manager.shutdown_all().await;
 }
+
+#[tokio::test]
+async fn shared_auth_token_reaches_every_consumer() {
+    let dir = tempfile::tempdir().unwrap();
+    let sink = Arc::new(RecordingSink::default());
+    // `a` and `b` share one app-provided secret; `c` gets a generated one.
+    let manager = launch(
+        vec![
+            sh("a", "echo TOK_A=$SHARED; sleep 300")
+                .auth_token_value("SHARED", "sesame-open-42")
+                .health(HealthCheck::StdoutMarker {
+                    pattern: "TOK_A=".into(),
+                    timeout_secs: 10,
+                }),
+            sh("b", "echo TOK_B=$SHARED; sleep 300")
+                .auth_token_value("SHARED", "sesame-open-42")
+                .health(HealthCheck::StdoutMarker {
+                    pattern: "TOK_B=".into(),
+                    timeout_secs: 10,
+                }),
+            sh("c", "sleep 300").auth_token("OWN"),
+        ],
+        sink,
+        dir.path(),
+    );
+
+    manager.start_all().await;
+    for name in ["a", "b", "c"] {
+        wait_for_state(
+            &manager,
+            name,
+            |s| matches!(s, SidecarState::Healthy),
+            Duration::from_secs(10),
+        )
+        .await;
+    }
+
+    // Both processes actually received the same app-provided value.
+    let log_a = manager.logs("a", 10).unwrap().join("\n");
+    let log_b = manager.logs("b", 10).unwrap().join("\n");
+    assert!(log_a.contains("TOK_A=sesame-open-42"), "a saw: {log_a}");
+    assert!(log_b.contains("TOK_B=sesame-open-42"), "b saw: {log_b}");
+
+    // The effective token is readable back for forwarding to other consumers.
+    let token_a = manager.auth_token("a").unwrap();
+    assert_eq!(token_a.as_deref(), Some("sesame-open-42"));
+    assert_eq!(manager.auth_token("b").unwrap(), token_a);
+
+    // Generated tokens are exposed the same way (32-byte hex = 64 chars).
+    let token_c = manager.auth_token("c").unwrap().unwrap();
+    assert_eq!(token_c.len(), 64, "generated token: {token_c}");
+
+    manager.shutdown_all().await;
+}

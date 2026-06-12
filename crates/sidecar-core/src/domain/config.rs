@@ -78,10 +78,19 @@ pub enum AuthStrategy {
     /// No auth material injected.
     #[default]
     None,
-    /// A fresh random 32-byte hex token, injected via the given environment
-    /// variable. The sidecar should reject requests without it — a sidecar
-    /// not launched by this app simply never learns the token.
-    Token { inject_env: String },
+    /// A session token injected via the given environment variable. The
+    /// sidecar should reject requests without it — a sidecar not launched
+    /// by this app simply never learns the token.
+    ///
+    /// With `value: None` a fresh random 32-byte hex token is generated.
+    /// Provide a `value` when several consumers (other sidecars, the
+    /// frontend) must share one secret; either way the effective token is
+    /// readable back through `SidecarManager::auth_token`.
+    Token {
+        inject_env: String,
+        #[serde(default)]
+        value: Option<String>,
+    },
 }
 
 /// Readiness probe. A sidecar is only "healthy" — and its dependents only
@@ -264,6 +273,17 @@ impl SidecarConfig {
     pub fn auth_token(self, env_var: impl Into<String>) -> Self {
         self.auth(AuthStrategy::Token {
             inject_env: env_var.into(),
+            value: None,
+        })
+    }
+
+    /// Convenience: an app-provided token injected via `env_var` — use this
+    /// when several sidecars (or the frontend) must share one secret.
+    #[must_use]
+    pub fn auth_token_value(self, env_var: impl Into<String>, value: impl Into<String>) -> Self {
+        self.auth(AuthStrategy::Token {
+            inject_env: env_var.into(),
+            value: Some(value.into()),
         })
     }
 

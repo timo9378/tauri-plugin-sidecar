@@ -50,6 +50,9 @@ pub struct SupervisorHandle {
     pub state_rx: watch::Receiver<SidecarState>,
     pub logs: Arc<Mutex<VecDeque<LogLine>>>,
     pub port: Arc<Mutex<Option<u16>>>,
+    /// The effective auth token (generated or app-provided), so the app can
+    /// forward it to other consumers (frontend, peer sidecars).
+    pub token: Option<String>,
 }
 
 pub struct Supervisor {
@@ -82,6 +85,7 @@ impl Supervisor {
 
         let token = match &config.auth {
             AuthStrategy::None => None,
+            AuthStrategy::Token { value: Some(v), .. } => Some(v.clone()),
             AuthStrategy::Token { .. } => Some(generate_token()),
         };
 
@@ -93,7 +97,7 @@ impl Supervisor {
             state_tx,
             logs: logs.clone(),
             port: port.clone(),
-            token,
+            token: token.clone(),
             marker_rx,
             marker_tx,
         };
@@ -106,6 +110,7 @@ impl Supervisor {
             state_rx,
             logs,
             port,
+            token,
         }
     }
 
@@ -272,7 +277,8 @@ impl Supervisor {
         };
         *self.port.lock() = port;
 
-        if let (AuthStrategy::Token { inject_env }, Some(token)) = (&self.config.auth, &self.token)
+        if let (AuthStrategy::Token { inject_env, .. }, Some(token)) =
+            (&self.config.auth, &self.token)
         {
             env.push((inject_env.clone(), token.clone()));
         }
